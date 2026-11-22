@@ -1,0 +1,2238 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Los Santos Online 3D - Open World Heist</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #07090e;
+            font-family: 'Inter', sans-serif;
+            color: #ffffff;
+        }
+        #threeContainer {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            touch-action: none;
+        }
+
+        /* GTA 5 Style Minimap Container */
+        #minimapContainer {
+            position: fixed;
+            bottom: 22px;
+            left: 20px;
+            width: 220px;
+            height: 150px;
+            border-radius: 14px;
+            border: 3px solid rgba(255, 255, 255, 0.28);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.85), inset 0 0 16px rgba(0, 0, 0, 0.75);
+            overflow: hidden;
+            background: #0b1118;
+            z-index: 20;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        #minimapContainer.wanted-flash {
+            animation: minimapSiren 0.55s infinite alternate;
+        }
+        @keyframes minimapSiren {
+            0% { border-color: #ef4444; box-shadow: 0 0 22px rgba(239, 68, 68, 0.75); }
+            100% { border-color: #3b82f6; box-shadow: 0 0 22px rgba(59, 130, 246, 0.75); }
+        }
+        /* GTA Health & Armor Bars under Minimap */
+        #statusBars {
+            position: fixed;
+            bottom: 10px;
+            left: 20px;
+            width: 220px;
+            height: 8px;
+            display: flex;
+            gap: 4px;
+            z-index: 20;
+        }
+        .bar-bg {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.8);
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.18);
+        }
+        #healthFill {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, #16a34a, #4ade80);
+            transition: width 0.2s;
+        }
+        #armorFill {
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, #0284c7, #38bdf8);
+            transition: width 0.2s;
+        }
+
+        /* Dynamic 5-Star Wanted System */
+        #wantedStarsContainer {
+            display: flex;
+            gap: 6px;
+            justify-content: flex-end;
+            align-items: center;
+            min-height: 36px;
+            opacity: 0;
+            transform: translateY(-8px) scale(0.95);
+            transition: opacity 0.35s ease, transform 0.35s ease;
+            pointer-events: none;
+        }
+        #wantedStarsContainer.active {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+        .star-icon {
+            width: 28px;
+            height: 28px;
+            filter: drop-shadow(0 2px 6px rgba(0,0,0,0.9));
+            transition: transform 0.2s ease, opacity 0.2s ease;
+        }
+        .star-active {
+            color: #ffffff;
+            animation: starBlinkFast 0.45s infinite alternate;
+        }
+        .star-evading {
+            color: #9ca3af;
+            animation: starBlinkSlow 0.9s infinite alternate;
+        }
+        .star-inactive {
+            color: rgba(255, 255, 255, 0.2);
+        }
+        @keyframes starBlinkFast {
+            0% { color: #ffffff; transform: scale(1.1); filter: drop-shadow(0 0 8px rgba(255,255,255,0.85)); }
+            100% { color: #ef4444; transform: scale(0.96); filter: drop-shadow(0 0 8px rgba(239,68,68,0.95)); }
+        }
+        @keyframes starBlinkSlow {
+            0% { opacity: 0.95; color: #ffffff; }
+            100% { opacity: 0.22; color: #6b7280; }
+        }
+
+        .gold-glow { box-shadow: 0 0 28px rgba(250, 204, 21, 0.4); }
+        .cyan-glow { box-shadow: 0 0 28px rgba(34, 211, 238, 0.4); }
+        .terminal-font { font-family: 'JetBrains Mono', monospace; }
+
+        @keyframes pulsePrompt {
+            0%, 100% { transform: translate(-50%, 0) scale(1); }
+            50% { transform: translate(-50%, -4px) scale(1.03); }
+        }
+        #interactPrompt {
+            animation: pulsePrompt 1.5s infinite ease-in-out;
+        }
+
+        /* Custom Scrollbar for Chat & Modals */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+        ::-webkit-scrollbar-thumb { background: rgba(100, 116, 139, 0.6); border-radius: 99px; }
+
+        @media (max-width: 640px) {
+            #minimapContainer { width: 155px; height: 112px; bottom: 18px; left: 10px; }
+            #statusBars { width: 155px; bottom: 7px; left: 10px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. GTA 5 INSPIRED 3D LOADING SCREEN -->
+    <div id="loadingScreen" class="fixed inset-0 z-50 bg-[#06080d] flex flex-col items-center justify-center p-6 transition-opacity duration-700">
+        <div class="relative mb-6">
+            <div class="w-24 h-24 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-amber-400 p-1 animate-spin" style="animation-duration: 3.5s;">
+                <div class="w-full h-full bg-[#06080d] rounded-xl"></div>
+            </div>
+            <div class="absolute inset-0 flex items-center justify-center font-black text-3xl tracking-tighter bg-gradient-to-r from-cyan-400 to-amber-400 bg-clip-text text-transparent">
+                3D
+            </div>
+        </div>
+        <h1 class="text-3xl sm:text-5xl font-black tracking-tight text-center mb-2">
+            LOS SANTOS <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-amber-400">ONLINE 3D</span>
+        </h1>
+        <p id="loadingText" class="text-slate-400 text-sm sm:text-base mb-8 font-medium tracking-wide">Generiere 3D-Stadt, Maze Tower &amp; Flughafen...</p>
+        <div class="w-full max-w-md bg-slate-900/90 h-3 rounded-full overflow-hidden border border-slate-800 p-0.5">
+            <div id="loadingBar" class="h-full w-0 bg-gradient-to-r from-cyan-400 via-blue-500 to-amber-400 rounded-full transition-all duration-200"></div>
+        </div>
+        <div id="loadingPercent" class="mt-2 text-xs font-bold text-cyan-400">0%</div>
+    </div>
+
+    <!-- 2. ACCOUNT LOGIN & REGISTRATION SCREEN -->
+    <div id="authScreen" class="hidden fixed inset-0 z-40 bg-[#06080d]/95 backdrop-blur-xl flex items-center justify-center p-4">
+        <div class="w-full max-w-md bg-slate-900/95 border border-slate-700/70 rounded-3xl p-6 sm:p-8 shadow-2xl relative overflow-hidden">
+            <div class="absolute -top-24 -right-24 w-48 h-48 bg-cyan-500/20 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="absolute -bottom-24 -left-24 w-48 h-48 bg-amber-500/20 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="text-center mb-6">
+                <span class="inline-block px-3 py-1 rounded-full text-xs font-bold bg-emerald-400/15 text-emerald-300 border border-emerald-400/30 mb-3">
+                    AUTO-SAVE ALLE 10 MINUTEN AKTIV
+                </span>
+                <h2 class="text-2xl sm:text-3xl font-black tracking-tight">Spieler-Account</h2>
+                <p class="text-slate-400 text-xs sm:text-sm mt-1">
+                    Melde dich mit Benutzername &amp; Passwort an, um deinen 3D-Fortschritt, Porsche GT3 RS &amp; Jets zu speichern.
+                </p>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Benutzername</label>
+                    <input id="usernameInput" type="text" maxlength="18" placeholder="z.B. John_LS"
+                        class="w-full px-4 py-3 rounded-xl bg-slate-950/90 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition font-semibold select-text">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">Passwort</label>
+                    <input id="passwordInput" type="password" maxlength="24" placeholder="z.B. John1234"
+                        class="w-full px-4 py-3 rounded-xl bg-slate-950/90 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 transition font-semibold select-text">
+                </div>
+
+                <div id="authError" class="hidden text-xs font-semibold text-red-400 bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2"></div>
+
+                <button id="authSubmitBtn"
+                    class="w-full py-3.5 rounded-xl font-extrabold text-slate-950 bg-gradient-to-r from-cyan-400 via-sky-400 to-amber-400 hover:brightness-110 active:scale-[0.99] transition shadow-lg cursor-pointer">
+                    Registrieren / Einloggen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. GENDER / CHARACTER SELECTION SCREEN -->
+    <div id="charSelectScreen" class="hidden fixed inset-0 z-40 bg-[#06080d]/95 backdrop-blur-xl flex items-center justify-center p-4">
+        <div class="w-full max-w-xl bg-slate-900/95 border border-slate-700/70 rounded-3xl p-6 sm:p-8 shadow-2xl text-center">
+            <span class="inline-block px-3 py-1 rounded-full text-xs font-bold bg-cyan-400/15 text-cyan-300 border border-cyan-400/30 mb-2">
+                3D-CHARAKTER WÄHLEN
+            </span>
+            <h2 class="text-2xl sm:text-3xl font-black mb-2">Wähle dein Geschlecht</h2>
+            <p class="text-slate-400 text-sm mb-6">Danach spawnst du in 3D-Los Santos mit deinem Startgeschenk!</p>
+
+            <div class="grid grid-cols-2 gap-4 mb-2">
+                <button id="selectMaleBtn" class="group p-5 rounded-2xl bg-slate-950/85 border-2 border-slate-700 hover:border-cyan-400 transition flex flex-col items-center cursor-pointer">
+                    <div class="w-20 h-20 rounded-full bg-gradient-to-br from-cyan-500/20 to-blue-600/30 border border-cyan-400/40 flex items-center justify-center text-4xl mb-3 group-hover:scale-110 transition">
+                        🕶️
+                    </div>
+                    <span class="font-extrabold text-lg text-white">Männlich</span>
+                    <span class="text-xs text-slate-400 mt-1">Street Racer &amp; Heist-Profi</span>
+                </button>
+
+                <button id="selectFemaleBtn" class="group p-5 rounded-2xl bg-slate-950/85 border-2 border-slate-700 hover:border-amber-400 transition flex flex-col items-center cursor-pointer">
+                    <div class="w-20 h-20 rounded-full bg-gradient-to-br from-amber-500/20 to-pink-600/30 border border-amber-400/40 flex items-center justify-center text-4xl mb-3 group-hover:scale-110 transition">
+                        👑
+                    </div>
+                    <span class="font-extrabold text-lg text-white">Weiblich</span>
+                    <span class="text-xs text-slate-400 mt-1">Mastermind &amp; Jet-Pilotin</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. WELCOME GIFT MODAL (PORSCHE 911 GT3 RS SCHWARZ-GOLD) -->
+    <div id="welcomeGiftModal" class="hidden fixed inset-0 z-40 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="w-full max-w-md bg-gradient-to-b from-slate-900 to-slate-950 border-2 border-amber-400/60 rounded-3xl p-6 text-center gold-glow">
+            <div class="inline-block px-3 py-1 rounded-full text-xs font-black bg-amber-400 text-slate-950 tracking-wider mb-3">
+                WILLKOMMENSGESCHENK
+            </div>
+            <h3 class="text-2xl font-black text-white mb-1">3D Porsche 911 GT3 RS</h3>
+            <p class="text-amber-400 font-bold text-sm mb-4">Schwarz-Gold Edition + Goldene Felgen</p>
+
+            <div class="w-44 h-24 mx-auto my-3 bg-slate-900/90 rounded-2xl border border-amber-400/30 flex items-center justify-center">
+                <svg viewBox="0 0 180 90" class="w-40 h-20">
+                    <ellipse cx="90" cy="48" rx="74" ry="26" fill="rgba(0,0,0,0.6)"/>
+                    <rect x="20" y="24" width="138" height="42" rx="18" fill="#111318" stroke="#facc15" stroke-width="2.5"/>
+                    <rect x="35" y="39" width="110" height="4" fill="#facc15"/>
+                    <rect x="35" y="47" width="110" height="4" fill="#facc15"/>
+                    <path d="M 96 28 L 122 31 L 122 59 L 96 62 Z" fill="#1e293b" stroke="#eab308" stroke-width="1"/>
+                    <rect x="13" y="20" width="9" height="50" rx="3" fill="#090a0f" stroke="#facc15" stroke-width="2"/>
+                    <ellipse cx="152" cy="31" rx="4" ry="3" fill="#fef08a"/>
+                    <ellipse cx="152" cy="59" rx="4" ry="3" fill="#fef08a"/>
+                </svg>
+            </div>
+
+            <p class="text-slate-300 text-xs sm:text-sm mb-5 leading-relaxed">
+                Dein <span class="text-amber-300 font-bold">3D Porsche GT3 RS</span> sowie <span class="text-emerald-400 font-bold">25.000 € Startgeld</span> warten direkt vor dir! (Maus ziehen zum Kamera-Schwenk)
+            </p>
+            <button id="claimGiftBtn"
+                class="w-full py-3 rounded-xl font-black text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-300 hover:brightness-110 transition cursor-pointer">
+                Los Santos 3D betreten!
+            </button>
+        </div>
+    </div>
+
+    <!-- 5. THREE.JS 3D VIEWPORT -->
+    <div id="threeContainer"></div>
+
+    <!-- 6. TOP HUD (PLAYER INFO, CHAT, WAYPOINTS, DYNAMIC 5 STARS, MONEY, ADMIN) -->
+    <div id="gameHud" class="hidden fixed top-3 left-3 right-3 z-20 flex justify-between items-start pointer-events-none">
+        <!-- Left Column: Player Badge, Quick Nav & Roblox-Style Unfiltered P2P Chat -->
+        <div class="flex flex-col gap-2 pointer-events-auto max-w-[270px] sm:max-w-xs">
+            <div class="bg-slate-950/85 backdrop-blur-md border border-slate-700/70 rounded-2xl px-3.5 py-2 flex items-center gap-3 shadow-lg">
+                <div id="hudAvatar" class="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-lg font-bold shrink-0">
+                    🕶️
+                </div>
+                <div class="min-w-0">
+                    <div class="flex items-center gap-1.5">
+                        <span id="hudUsername" class="font-extrabold text-sm text-white truncate">Spieler</span>
+                        <span id="hudModeBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 shrink-0">
+                            GT3 RS
+                        </span>
+                    </div>
+                    <div id="hudZone" class="text-[11px] text-slate-400 font-medium truncate">Downtown Los Santos</div>
+                </div>
+            </div>
+
+            <!-- Waypoints & Admin / Garage Action Row -->
+            <div class="flex flex-wrap gap-1.5">
+                <button id="btnNavAirport" class="px-2.5 py-1.5 rounded-xl bg-slate-950/85 hover:bg-slate-900 border border-amber-400/40 text-amber-300 text-xs font-bold shadow cursor-pointer transition">
+                    ✈️ Jet-Heist
+                </button>
+                <button id="btnNavMaze" class="px-2.5 py-1.5 rounded-xl bg-slate-950/85 hover:bg-slate-900 border border-cyan-400/40 text-cyan-300 text-xs font-bold shadow cursor-pointer transition">
+                    🏦 Maze Tower
+                </button>
+                <button id="btnAdminPanel" class="px-2.5 py-1.5 rounded-xl bg-purple-950/90 hover:bg-purple-900 border border-purple-400/50 text-purple-200 text-xs font-bold shadow cursor-pointer transition">
+                    🛡️ Admin (M)
+                </button>
+            </div>
+
+            <!-- Roblox-Style Unfiltered P2P Multiplayer Chat -->
+            <div id="chatBox" class="bg-slate-950/75 backdrop-blur-md border border-slate-700/60 rounded-2xl p-2.5 shadow-xl">
+                <div class="flex justify-between items-center text-[10px] font-bold text-slate-400 mb-1.5 px-1">
+                    <span class="text-emerald-400">● P2P PRIVATSERVER (WebRTC: #LS-884)</span>
+                    <button id="toggleChatCollapse" class="text-slate-300 hover:text-white cursor-pointer">[T]</button>
+                </div>
+                <div id="chatMessages" class="h-24 overflow-y-auto space-y-1 text-xs px-1 mb-1.5">
+                    <div><span class="font-bold text-cyan-400">[System]:</span> Willkommen im ungefilterten Privatserver-Chat!</div>
+                    <div><span class="font-bold text-amber-400">[Max_GT3]:</span> Wer kommt gleich mit zum Maze Tower Banküberfall?</div>
+                    <div><span class="font-bold text-pink-400">[Luna_Fly]:</span> Ich hole mir den goldenen Jet am Flughafen!</div>
+                </div>
+                <div class="flex gap-1.5">
+                    <input id="chatInput" type="text" maxlength="100" placeholder="Nachricht senden (Taste T)..."
+                        class="w-full px-2.5 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 select-text">
+                    <button id="chatSendBtn" class="px-2.5 py-1.5 rounded-xl bg-cyan-500 text-slate-950 font-black text-xs cursor-pointer">➤</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Dynamic 5 Wanted Stars + Money, Flight/Speedometer & Save -->
+        <div class="flex flex-col items-end gap-2 pointer-events-auto">
+            <!-- Dynamic 5-Star Wanted Level (Completely invisible at 0 stars!) -->
+            <div id="wantedStarsContainer" aria-label="Fahndungslevel">
+                <svg class="star-icon star-inactive" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                <svg class="star-icon star-inactive" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                <svg class="star-icon star-inactive" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                <svg class="star-icon star-inactive" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                <svg class="star-icon star-inactive" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+            </div>
+
+            <div id="wantedStatusText" class="hidden text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-lg bg-red-600/90 text-white shadow">
+                FAHNDUNG AKTIV
+            </div>
+
+            <!-- Money + Sound + Export Save -->
+            <div class="flex items-center gap-1.5">
+                <div class="bg-slate-950/85 backdrop-blur-md border border-emerald-500/40 rounded-2xl px-3.5 py-1.5 text-right shadow-lg">
+                    <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kontostand</div>
+                    <div id="hudMoney" class="font-black text-base sm:text-lg text-emerald-400">25.000 €</div>
+                </div>
+                <button id="btnManualExport" title="Spielstand jetzt exportieren (Auto-Backup alle 10 Min.)" class="w-10 h-10 rounded-2xl bg-slate-950/85 border border-slate-700 flex items-center justify-center text-base hover:bg-slate-800 cursor-pointer">
+                    💾
+                </button>
+                <button id="btnToggleSound" title="Ton an/aus" class="w-10 h-10 rounded-2xl bg-slate-950/85 border border-slate-700 flex items-center justify-center text-base hover:bg-slate-800 cursor-pointer">
+                    🔊
+                </button>
+            </div>
+
+            <!-- Speed / Altitude Telemetry Pill -->
+            <div id="telemetryPill" class="bg-slate-950/80 border border-slate-700/70 rounded-xl px-3 py-1 text-xs font-bold text-cyan-300 shadow">
+                0 km/h
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. GTA 5 DETAILED MINIMAP (BOTTOM LEFT) -->
+    <div id="minimapContainer" class="hidden">
+        <canvas id="minimapCanvas"></canvas>
+    </div>
+    <div id="statusBars" class="hidden">
+        <div class="bar-bg"><div id="healthFill"></div></div>
+        <div class="bar-bg"><div id="armorFill"></div></div>
+    </div>
+
+    <!-- 8. CONTEXT PROMPT & MISSION BANNER -->
+    <div id="missionBanner" class="hidden fixed top-24 left-1/2 -translate-x-1/2 z-20 max-w-md w-[90%] bg-slate-950/90 backdrop-blur-md border border-amber-400/50 rounded-2xl px-4 py-3 text-center shadow-2xl pointer-events-none">
+        <div id="missionTitle" class="text-xs font-black uppercase tracking-widest text-amber-400">MISSION AKTIV</div>
+        <div id="missionDesc" class="text-sm font-bold text-white mt-0.5">Entkomme der Polizei!</div>
+        <div id="missionProgressWrap" class="hidden w-full bg-slate-800 h-2 rounded-full mt-2 overflow-hidden">
+            <div id="missionProgressBar" class="h-full bg-gradient-to-r from-amber-400 to-emerald-400 w-0 transition-all duration-150"></div>
+        </div>
+    </div>
+
+    <div id="interactPrompt" class="hidden fixed bottom-44 sm:bottom-24 left-1/2 -translate-x-1/2 z-20 bg-slate-950/90 border border-cyan-400/60 text-white px-4 py-2.5 rounded-2xl shadow-2xl flex items-center gap-2.5 cursor-pointer">
+        <span class="px-2 py-0.5 rounded-lg bg-cyan-400 text-slate-950 font-black text-xs">E / F</span>
+        <span id="interactText" class="text-xs sm:text-sm font-bold">Interagieren</span>
+    </div>
+
+    <!-- 9. PRIVATE SERVER ADMIN PANEL & TUNING GARAGE (KEY M) -->
+    <div id="adminModal" class="hidden fixed inset-0 z-30 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="w-full max-w-lg bg-slate-900 border-2 border-purple-500/50 rounded-3xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-purple-500/20 text-purple-300 border border-purple-400/40">
+                        PRIVATSERVER EXKLUSIV
+                    </span>
+                    <h3 class="text-xl font-black mt-1">Admin-Panel &amp; Tuning-Werkstatt</h3>
+                </div>
+                <button id="closeAdminBtn" class="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold cursor-pointer">✕</button>
+            </div>
+
+            <!-- Admin Toggles -->
+            <div class="grid grid-cols-2 gap-2.5 mb-5">
+                <button id="toggleFlyMode" class="p-3 rounded-2xl bg-slate-950 border border-slate-700 hover:border-purple-400 text-left transition cursor-pointer">
+                    <div class="text-xs font-black text-purple-300">🕊️ Fly-Mode</div>
+                    <div id="flyModeStatus" class="text-[11px] text-slate-400 font-bold mt-0.5">AUS (Leertaste/Shift)</div>
+                </button>
+                <button id="toggleGodMode" class="p-3 rounded-2xl bg-slate-950 border border-slate-700 hover:border-amber-400 text-left transition cursor-pointer">
+                    <div class="text-xs font-black text-amber-300">⚡ God Mode &amp; Unsterblich</div>
+                    <div id="godModeStatus" class="text-[11px] text-slate-400 font-bold mt-0.5">AUS</div>
+                </button>
+                <button id="btnAdminAddMoney" class="p-3 rounded-2xl bg-slate-950 border border-emerald-500/40 hover:bg-emerald-950/30 text-left transition cursor-pointer">
+                    <div class="text-xs font-black text-emerald-400">💵 +100.000 € (Tuning-Geld)</div>
+                    <div class="text-[11px] text-slate-400 mt-0.5">Für Autoteile &amp; Upgrades</div>
+                </button>
+                <button id="btnAdminClearStars" class="p-3 rounded-2xl bg-slate-950 border border-cyan-500/40 hover:bg-cyan-950/30 text-left transition cursor-pointer">
+                    <div class="text-xs font-black text-cyan-400">🚓 Fahndung löschen</div>
+                    <div class="text-[11px] text-slate-400 mt-0.5">Alle Sterne entfernen</div>
+                </button>
+            </div>
+
+            <!-- Vehicle Spawner -->
+            <h4 class="text-xs font-black uppercase tracking-wider text-slate-400 mb-2">Fahrzeug-Spawner &amp; Garage</h4>
+            <div class="grid grid-cols-2 gap-2.5 mb-5">
+                <button id="spawnPorscheBtn" class="p-3 rounded-2xl bg-slate-950 border border-amber-400/40 hover:bg-slate-800 text-xs font-bold text-amber-300 cursor-pointer">
+                    🏎️ Porsche GT3 RS rufen
+                </button>
+                <button id="spawnJetBtn" class="p-3 rounded-2xl bg-slate-950 border border-yellow-400/40 hover:bg-slate-800 text-xs font-bold text-yellow-300 cursor-pointer">
+                    ✈️ Goldenen Jet rufen
+                </button>
+            </div>
+
+            <!-- Car Tuning Section -->
+            <h4 class="text-xs font-black uppercase tracking-wider text-slate-400 mb-2">Porsche GT3 RS Tuning-Teile</h4>
+            <div class="bg-slate-950 border border-slate-800 rounded-2xl p-3.5 space-y-3">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold">Lackierung:</span>
+                    <div class="flex gap-2">
+                        <button data-color="#111318" class="tune-color-btn w-6 h-6 rounded-full bg-[#111318] border-2 border-amber-400 cursor-pointer" title="Schwarz-Gold"></button>
+                        <button data-color="#dc2626" class="tune-color-btn w-6 h-6 rounded-full bg-red-600 border border-white/40 cursor-pointer" title="Guards Red"></button>
+                        <button data-color="#0284c7" class="tune-color-btn w-6 h-6 rounded-full bg-sky-600 border border-white/40 cursor-pointer" title="Miami Blue"></button>
+                        <button data-color="#eab308" class="tune-color-btn w-6 h-6 rounded-full bg-yellow-500 border border-white/40 cursor-pointer" title="Vollgold"></button>
+                    </div>
+                </div>
+                <button id="btnUpgradeEngine" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-black text-xs cursor-pointer">
+                    🚀 Twin-Turbo Motor-Kit einbauen (15.000 €)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 10. MAZE TOWER HEIST: CREW LOBBY (2-5 PLAYERS) & GTA 5 HACKING TERMINAL -->
+    <div id="mazeHeistModal" class="hidden fixed inset-0 z-30 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="w-full max-w-lg bg-slate-950 border-2 border-cyan-500/60 rounded-3xl p-6 shadow-2xl cyan-glow">
+            <!-- Step A: Crew Lobby -->
+            <div id="heistLobbyStep">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="px-3 py-1 rounded-full text-xs font-black bg-cyan-400/20 text-cyan-300 border border-cyan-400/40">
+                        MAZE TOWER BANKÜBERFALL
+                    </span>
+                    <button id="closeHeistBtn" class="w-8 h-8 rounded-full bg-slate-800 text-slate-300 font-bold cursor-pointer">✕</button>
+                </div>
+                <h3 class="text-2xl font-black mb-1">Crew zusammenstellen (2–5 Spieler)</h3>
+                <p class="text-slate-400 text-xs sm:text-sm mb-4">
+                    Beute: <span class="text-emerald-400 font-bold">250.000 €</span>. Ein Hacker schaltet zuerst die Kameras im GTA-5-Terminal aus!
+                </p>
+
+                <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 mb-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <span class="text-xs font-bold uppercase text-slate-400">Heist-Team</span>
+                        <div class="flex gap-1.5">
+                            <button id="removeCrewBtn" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold cursor-pointer">- Spieler</button>
+                            <button id="addCrewBtn" class="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold cursor-pointer">+ Spieler</button>
+                        </div>
+                    </div>
+                    <div id="crewList" class="space-y-2 text-xs"></div>
+                </div>
+
+                <button id="startHackStepBtn" class="w-full py-3.5 rounded-xl font-black text-slate-950 bg-gradient-to-r from-cyan-400 to-emerald-400 hover:brightness-110 transition cursor-pointer">
+                    Überwachungskameras hacken (Terminal starten)
+                </button>
+            </div>
+
+            <!-- Step B: GTA 5 Terminal Hacking Minigame -->
+            <div id="heistHackStep" class="hidden terminal-font">
+                <div class="flex justify-between items-center border-b border-cyan-500/30 pb-2 mb-3">
+                    <span class="text-cyan-400 font-bold text-xs">SEC-OS v5.0 // KAMERA-OVERRIDE</span>
+                    <span id="hackTimerText" class="text-amber-400 font-bold text-xs">ZEIT: 20.0s</span>
+                </div>
+                <p class="text-xs text-slate-300 mb-3">
+                    Klicke die <span class="text-cyan-300 font-bold">4 Sicherheits-Knoten (1 → 2 → 3 → 4)</span> in der richtigen Reihenfolge an!
+                </p>
+                <div id="hackGrid" class="grid grid-cols-4 gap-2.5 my-4"></div>
+                <div id="hackStatusMsg" class="text-center text-xs font-bold text-cyan-400 h-5"></div>
+            </div>
+
+            <!-- Step C: Guard Takedown -->
+            <div id="heistInfiltrationStep" class="hidden text-center">
+                <div class="p-5 rounded-2xl bg-slate-900 border border-slate-700 mb-4">
+                    <div class="text-4xl mb-2">🥷</div>
+                    <h4 class="text-lg font-black text-white">Infiltration im Maze Tower</h4>
+                    <p id="infiltrationDesc" class="text-xs text-slate-300 mt-1">
+                        Kameras sind aus! Schalte die 3 Sicherheitswachen vor dem Tresor lautlos aus.
+                    </p>
+                </div>
+                <button id="takedownGuardBtn" class="w-full py-3.5 rounded-xl font-black text-white bg-gradient-to-r from-blue-600 to-cyan-500 hover:brightness-110 transition cursor-pointer">
+                    Wache lautlos ausschalten (1 / 3)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 11. DRAMATIC ALARM CUTSCENE OVERLAY -->
+    <div id="alarmCutsceneOverlay" class="hidden fixed inset-0 z-50 bg-red-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+        <div class="px-4 py-1.5 rounded-full bg-red-600 text-white font-black text-xs tracking-widest uppercase animate-bounce mb-4">
+            ⚠️ CUTSCENE // PANIKKNOPF GEDRÜCKT ⚠️
+        </div>
+        <h2 class="text-3xl sm:text-5xl font-black text-white tracking-tight mb-3 drop-shadow-lg">
+            ALARM IM MAZE TOWER!
+        </h2>
+        <p class="max-w-md text-red-100 text-sm sm:text-base font-medium mb-6">
+            Ein Mitarbeiter hat es im letzten Moment geschafft, den Alarmknopf zu drücken! Ihr habt <span class="text-amber-300 font-black">250.000 €</span> eingesteckt – ab ins Fluchtauto!
+        </p>
+        <div class="w-16 h-16 rounded-full border-4 border-white border-t-transparent animate-spin"></div>
+    </div>
+
+    <!-- 12. TOAST NOTIFICATION -->
+    <div id="toastMessage" class="hidden fixed top-24 right-4 z-40 bg-slate-900/95 border border-emerald-400/60 text-white px-4 py-3 rounded-2xl shadow-2xl text-xs sm:text-sm font-bold max-w-xs">
+    </div>
+
+    <!-- 13. MOBILE / TOUCH CONTROLS -->
+    <div id="touchControls" class="hidden fixed bottom-4 right-4 z-20 flex items-end gap-2">
+        <div class="flex flex-col gap-1.5 mr-1">
+            <button data-key="Space" class="touch-btn px-3 py-2.5 bg-cyan-600/85 active:bg-cyan-400 text-white rounded-xl font-black text-xs shadow">SCHUB / HOCH</button>
+            <button data-key="ShiftLeft" class="touch-btn px-3 py-2.5 bg-slate-800/85 active:bg-slate-600 text-white rounded-xl font-black text-xs shadow">BREMSE / RUNTER</button>
+        </div>
+        <div class="grid grid-cols-3 gap-1.5 w-36 h-36">
+            <div></div>
+            <button data-key="KeyW" class="touch-btn bg-slate-900/85 active:bg-cyan-500/60 border border-slate-600 rounded-xl flex items-center justify-center text-lg font-black">▲</button>
+            <div></div>
+            <button data-key="KeyA" class="touch-btn bg-slate-900/85 active:bg-cyan-500/60 border border-slate-600 rounded-xl flex items-center justify-center text-lg font-black">◀</button>
+            <button id="touchExitBtn" class="bg-amber-500/90 active:bg-amber-400 text-slate-950 border border-amber-300 rounded-xl flex items-center justify-center text-[10px] font-black leading-tight text-center p-1">EIN/AUS<br>(F)</button>
+            <button data-key="KeyD" class="touch-btn bg-slate-900/85 active:bg-cyan-500/60 border border-slate-600 rounded-xl flex items-center justify-center text-lg font-black">▶</button>
+            <div></div>
+            <button data-key="KeyS" class="touch-btn bg-slate-900/85 active:bg-cyan-500/60 border border-slate-600 rounded-xl flex items-center justify-center text-lg font-black">▼</button>
+            <div></div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * LOS SANTOS ONLINE 3D - FULL THREE.JS ENGINE
+         * Real 3D Open-World City, 3D Porsche 911 GT3 RS, 3D Golden Jet with GTA 5 Flight Controls,
+         * Maze Tower Heist + Terminal Hack + Cutscene, Dynamic 5-Star Police AI, Admin Panel & Chat.
+         */
+
+        // ==========================================
+        // 1. WEB AUDIO SYNTHESIZER (SFX & SIRENS)
+        // ==========================================
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+                this.lastSirenTime = 0;
+                this.sirenToggle = false;
+            }
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) this.ctx = new AudioCtx();
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+            playTone(freq, type, duration, vol = 0.08, slideTo = null) {
+                if (!this.enabled) return;
+                this.init();
+                if (!this.ctx) return;
+                try {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, this.ctx.currentTime + duration);
+                    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {}
+            }
+            playReward() {
+                this.playTone(523.25, 'triangle', 0.14, 0.12);
+                setTimeout(() => this.playTone(659.25, 'triangle', 0.14, 0.12), 110);
+                setTimeout(() => this.playTone(783.99, 'triangle', 0.16, 0.12), 220);
+                setTimeout(() => this.playTone(1046.5, 'sine', 0.35, 0.15), 340);
+            }
+            playAlarm() {
+                this.playTone(880, 'sawtooth', 0.25, 0.12, 440);
+                setTimeout(() => this.playTone(880, 'sawtooth', 0.25, 0.12, 440), 280);
+            }
+            playHackNode(step) {
+                this.playTone(400 + step * 140, 'sine', 0.12, 0.1);
+            }
+            updateSiren(wantedLevel, now) {
+                if (!this.enabled || wantedLevel <= 0) return;
+                if (now - this.lastSirenTime > 420) {
+                    this.lastSirenTime = now;
+                    this.sirenToggle = !this.sirenToggle;
+                    this.playTone(this.sirenToggle ? 690 : 510, 'sine', 0.36, 0.035);
+                }
+            }
+        }
+        const sfx = new SoundFX();
+
+        // ==========================================
+        // 2. ACCOUNT & 10-MINUTE AUTO-EXPORT SYSTEM
+        // ==========================================
+        const STORAGE_KEY = 'ls_online_3d_accounts_v1';
+        let currentUser = null;
+
+        function loadAllAccounts() {
+            try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+            catch (e) { return {}; }
+        }
+
+        function saveCurrentUser() {
+            if (!currentUser) return;
+            const accounts = loadAllAccounts();
+            accounts[currentUser.username.toLowerCase()] = currentUser;
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts)); } catch (e) {}
+            updateHud();
+        }
+
+        function exportSaveFile(isAuto = false) {
+            if (!currentUser) return;
+            saveCurrentUser();
+            const blob = new Blob([JSON.stringify(currentUser, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `LosSantos3D_${currentUser.username}_Save.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            showToast(isAuto ? '💾 Automatischer 10-Minuten-Spielstand exportiert!' : '💾 Spielstand als JSON exportiert!');
+        }
+
+        // Auto-save & export every 10 minutes (600,000 ms)
+        setInterval(() => {
+            if (currentUser && state.running) {
+                exportSaveFile(true);
+            }
+        }, 600000);
+
+        // ==========================================
+        // 3. THREE.JS 3D SCENE, LIGHTING & WORLD
+        // ==========================================
+        const threeContainer = document.getElementById('threeContainer');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0b1324);
+        scene.fog = new THREE.FogExp2(0x0b1324, 0.0014);
+
+        const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 2200);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        threeContainer.appendChild(renderer.domElement);
+
+        // Lighting (Sunset/Night Neon GTA Vibe + Sun Shadows)
+        const hemiLight = new THREE.HemisphereLight(0x8ecae6, 0x1e293b, 0.85);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfff3d1, 1.15);
+        dirLight.position.set(180, 320, 140);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 10;
+        dirLight.shadow.camera.far = 1100;
+        const d = 320;
+        dirLight.shadow.camera.left = -d;
+        dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d;
+        dirLight.shadow.camera.bottom = -d;
+        scene.add(dirLight);
+
+        // World Coordinates (1 unit = 1 meter in 3D space, centered around 0,0)
+        const WORLD = {
+            halfSize: 750, // 1500x1500 3D open world
+            roadCoords: [-450, -150, 150, 450],
+            roadWidth: 36,
+            mazeTower: { x: -60, z: -60, w: 68, d: 68, h: 240, doorX: -60, doorZ: -12 },
+            airport: {
+                x: 340, z: 340, w: 340, d: 380,
+                runwayX: 380, runwayZ: 340, runwayW: 44, runwayD: 340,
+                jetSpawnX: 380, jetSpawnZ: 470
+            },
+            buildings: []
+        };
+
+        // Ground Plane
+        const groundGeo = new THREE.PlaneGeometry(WORLD.halfSize * 2.4, WORLD.halfSize * 2.4);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x16221c, roughness: 0.9 });
+        const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+        groundMesh.rotation.x = -Math.PI / 2;
+        groundMesh.receiveShadow = true;
+        scene.add(groundMesh);
+
+        // Build 3D Roads, Sidewalks, Skyscrapers, Maze Tower & Airport
+        const markerRings = [];
+
+        function build3DWorld() {
+            const roadMat = new THREE.MeshStandardMaterial({ color: 0x1f242d, roughness: 0.8 });
+            const lineMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+
+            // Horizontal & Vertical Roads
+            WORLD.roadCoords.forEach(coord => {
+                // X-axis road
+                const rX = new THREE.Mesh(new THREE.BoxGeometry(WORLD.halfSize * 2, 0.25, WORLD.roadWidth), roadMat);
+                rX.position.set(0, 0.12, coord);
+                rX.receiveShadow = true;
+                scene.add(rX);
+
+                // Yellow center stripe
+                const lX = new THREE.Mesh(new THREE.BoxGeometry(WORLD.halfSize * 2, 0.3, 0.6), lineMat);
+                lX.position.set(0, 0.16, coord);
+                scene.add(lX);
+
+                // Z-axis road
+                const rZ = new THREE.Mesh(new THREE.BoxGeometry(WORLD.roadWidth, 0.25, WORLD.halfSize * 2), roadMat);
+                rZ.position.set(coord, 0.12, 0);
+                rZ.receiveShadow = true;
+                scene.add(rZ);
+
+                const lZ = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.3, WORLD.halfSize * 2), lineMat);
+                lZ.position.set(coord, 0.16, 0);
+                scene.add(lZ);
+            });
+
+            // Airport Tarmac & Runway (South-East)
+            const ap = WORLD.airport;
+            const tarmac = new THREE.Mesh(
+                new THREE.BoxGeometry(ap.w, 0.3, ap.d),
+                new THREE.MeshStandardMaterial({ color: 0x262c36, roughness: 0.85 })
+            );
+            tarmac.position.set(ap.x, 0.15, ap.z);
+            tarmac.receiveShadow = true;
+            scene.add(tarmac);
+
+            const runway = new THREE.Mesh(
+                new THREE.BoxGeometry(ap.runwayW, 0.36, ap.runwayD),
+                new THREE.MeshStandardMaterial({ color: 0x0f131a, roughness: 0.75 })
+            );
+            runway.position.set(ap.runwayX, 0.18, ap.runwayZ);
+            runway.receiveShadow = true;
+            scene.add(runway);
+
+            // Runway dashed white lines
+            const whiteStripeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            for (let rz = ap.runwayZ - 150; rz <= ap.runwayZ + 150; rz += 24) {
+                const dash = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.4, 12), whiteStripeMat);
+                dash.position.set(ap.runwayX, 0.21, rz);
+                scene.add(dash);
+            }
+
+            // Airport Hangar
+            const hangar = new THREE.Mesh(
+                new THREE.BoxGeometry(58, 22, 68),
+                new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.4, roughness: 0.5 })
+            );
+            hangar.position.set(ap.x - 85, 11, ap.z + 70);
+            hangar.castShadow = true;
+            hangar.receiveShadow = true;
+            scene.add(hangar);
+
+            // MAZE BANK TOWER (Tall Iconic Skyscraper in Center)
+            const mt = WORLD.mazeTower;
+            const towerMat = new THREE.MeshStandardMaterial({
+                color: 0x1e293b,
+                metalness: 0.65,
+                roughness: 0.25
+            });
+            const towerMesh = new THREE.Mesh(new THREE.BoxGeometry(mt.w, mt.h, mt.d), towerMat);
+            towerMesh.position.set(mt.x, mt.h / 2, mt.z);
+            towerMesh.castShadow = true;
+            towerMesh.receiveShadow = true;
+            scene.add(towerMesh);
+
+            // Red Maze Bank Crown Ring at Top
+            const crown = new THREE.Mesh(
+                new THREE.CylinderGeometry(36, 36, 12, 24),
+                new THREE.MeshStandardMaterial({ color: 0xdc2626, emissive: 0x7f1d1d, roughness: 0.3 })
+            );
+            crown.position.set(mt.x, mt.h + 6, mt.z);
+            scene.add(crown);
+
+            // Glowing Cyan Heist Entrance Ring at Maze Tower Base
+            const mazeRing = new THREE.Mesh(
+                new THREE.RingGeometry(4.5, 6.2, 32),
+                new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide })
+            );
+            mazeRing.rotation.x = -Math.PI / 2;
+            mazeRing.position.set(mt.doorX, 0.4, mt.doorZ);
+            scene.add(mazeRing);
+            markerRings.push(mazeRing);
+
+            // Glowing Gold Heist Ring at Airport Jet
+            const jetRing = new THREE.Mesh(
+                new THREE.RingGeometry(6.5, 8.5, 32),
+                new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide })
+            );
+            jetRing.rotation.x = -Math.PI / 2;
+            jetRing.position.set(ap.jetSpawnX, 0.4, ap.jetSpawnZ);
+            scene.add(jetRing);
+            markerRings.push(jetRing);
+
+            // Procedural 3D City Skyscrapers & Trees in City Blocks
+            const blockCenters = [
+                [-600, -600], [-300, -600], [0, -600], [300, -600], [600, -600],
+                [-600, -300], [-300, -300], [0, -300], [300, -300], [600, -300],
+                [-600, 0],    [-300, 0],                [300, 0],    [600, 0],
+                [-600, 300],  [-300, 300],  [0, 300],
+                [-600, 600],  [-300, 600],  [0, 600]
+            ];
+
+            const bColors = [0x1e293b, 0x273549, 0x172033, 0x334155, 0x1f2937];
+            const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x451a03 });
+            const treeLeafMat = new THREE.MeshStandardMaterial({ color: 0x15803d });
+
+            blockCenters.forEach(([bx, bz], idx) => {
+                // Place 2 skyscrapers per block
+                for (let s = 0; s < 2; s++) {
+                    const offsetX = s === 0 ? -48 : 48;
+                    const offsetZ = s === 0 ? -38 : 42;
+                    const w = 58 + ((idx + s) % 3) * 14;
+                    const d = 58 + ((idx * 2 + s) % 3) * 14;
+                    const h = 45 + ((idx * 17 + s * 31) % 110);
+
+                    const bMesh = new THREE.Mesh(
+                        new THREE.BoxGeometry(w, h, d),
+                        new THREE.MeshStandardMaterial({
+                            color: bColors[(idx + s) % bColors.length],
+                            roughness: 0.4,
+                            metalness: 0.4
+                        })
+                    );
+                    const finalX = bx + offsetX;
+                    const finalZ = bz + offsetZ;
+                    bMesh.position.set(finalX, h / 2, finalZ);
+                    bMesh.castShadow = true;
+                    bMesh.receiveShadow = true;
+                    scene.add(bMesh);
+
+                    WORLD.buildings.push({ x: finalX, z: finalZ, w, d });
+                }
+
+                // Decorative Street Tree
+                const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.1, 6, 8), treeTrunkMat);
+                trunk.position.set(bx, 3, bz + 95);
+                scene.add(trunk);
+                const leaves = new THREE.Mesh(new THREE.ConeGeometry(4.5, 11, 8), treeLeafMat);
+                leaves.position.set(bx, 10, bz + 95);
+                leaves.castShadow = true;
+                scene.add(leaves);
+            });
+        }
+        build3DWorld();
+
+        // ==========================================
+        // 4. DETAILED 3D MESH FACTORIES (PORSCHE, JET, PLAYER, POLICE)
+        // ==========================================
+        function createPorsche3DMesh(bodyHex = '#111318') {
+            const group = new THREE.Group();
+
+            const bodyMat = new THREE.MeshStandardMaterial({
+                color: new THREE.Color(bodyHex),
+                metalness: 0.75,
+                roughness: 0.2
+            });
+            const goldMat = new THREE.MeshStandardMaterial({
+                color: 0xfacc15,
+                metalness: 0.85,
+                roughness: 0.2
+            });
+            const glassMat = new THREE.MeshStandardMaterial({
+                color: 0x0f172a,
+                metalness: 0.9,
+                roughness: 0.1
+            });
+
+            // Main Low-Slung Sports Chassis
+            const chassis = new THREE.Mesh(new THREE.BoxGeometry(4.4, 1.1, 8.6), bodyMat);
+            chassis.position.y = 1.15;
+            chassis.castShadow = true;
+            group.add(chassis);
+
+            // Aerodynamic Cabin
+            const cabin = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.95, 4.4), glassMat);
+            cabin.position.set(0, 2.0, -0.3);
+            cabin.castShadow = true;
+            group.add(cabin);
+
+            // Gold Racing Stripes along Hood & Roof
+            const stripe1 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.15, 8.65), goldMat);
+            stripe1.position.set(-0.45, 1.16, 0);
+            group.add(stripe1);
+            const stripe2 = new THREE.Mesh(new THREE.BoxGeometry(0.28, 1.15, 8.65), goldMat);
+            stripe2.position.set(0.45, 1.16, 0);
+            group.add(stripe2);
+
+            // Iconic GT3 RS Swan-Neck Rear Wing
+            const wingBoard = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.18, 1.1), bodyMat);
+            wingBoard.position.set(0, 2.45, -3.9);
+            group.add(wingBoard);
+            const wingEdge = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.22, 0.15), goldMat);
+            wingEdge.position.set(0, 2.45, -4.45);
+            group.add(wingEdge);
+
+            // 4 Wheels with Gold Rims
+            const tireGeo = new THREE.CylinderGeometry(0.75, 0.75, 0.65, 16);
+            tireGeo.rotateZ(Math.PI / 2);
+            const tireMat = new THREE.MeshStandardMaterial({ color: 0x090a0f, roughness: 0.8 });
+            const rimGeo = new THREE.CylinderGeometry(0.48, 0.48, 0.68, 12);
+            rimGeo.rotateZ(Math.PI / 2);
+
+            const wheelPositions = [
+                [-2.15, 0.75, 2.6],
+                [2.15, 0.75, 2.6],
+                [-2.15, 0.75, -2.6],
+                [2.15, 0.75, -2.6]
+            ];
+            wheelPositions.forEach(([wx, wy, wz]) => {
+                const tire = new THREE.Mesh(tireGeo, tireMat);
+                tire.position.set(wx, wy, wz);
+                group.add(tire);
+                const rim = new THREE.Mesh(rimGeo, goldMat);
+                rim.position.set(wx, wy, wz);
+                group.add(rim);
+            });
+
+            // Headlights
+            const lightMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+            const hlLeft = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.35, 0.2), lightMat);
+            hlLeft.position.set(-1.5, 1.2, 4.32);
+            group.add(hlLeft);
+            const hlRight = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.35, 0.2), lightMat);
+            hlRight.position.set(1.5, 1.2, 4.32);
+            group.add(hlRight);
+
+            group.userData.bodyMat = bodyMat;
+            return group;
+        }
+
+        function createGoldenJet3DMesh() {
+            const group = new THREE.Group();
+            const goldMat = new THREE.MeshStandardMaterial({
+                color: 0xfacc15,
+                metalness: 0.88,
+                roughness: 0.18
+            });
+            const darkGlass = new THREE.MeshStandardMaterial({
+                color: 0x0f172a,
+                metalness: 0.9,
+                roughness: 0.1
+            });
+
+            // Fuselage
+            const bodyGeo = new THREE.CylinderGeometry(1.5, 1.2, 16, 16);
+            bodyGeo.rotateX(Math.PI / 2);
+            const fuselage = new THREE.Mesh(bodyGeo, goldMat);
+            fuselage.position.y = 2.6;
+            fuselage.castShadow = true;
+            group.add(fuselage);
+
+            // Nose Cone
+            const noseGeo = new THREE.ConeGeometry(1.5, 4.2, 16);
+            noseGeo.rotateX(Math.PI / 2);
+            const nose = new THREE.Mesh(noseGeo, goldMat);
+            nose.position.set(0, 2.6, 10.1);
+            group.add(nose);
+
+            // Cockpit Windows
+            const cockpit = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.0, 2.8), darkGlass);
+            cockpit.position.set(0, 3.3, 6.8);
+            group.add(cockpit);
+
+            // Swept Main Wings
+            const wing = new THREE.Mesh(new THREE.BoxGeometry(22, 0.35, 4.2), goldMat);
+            wing.position.set(0, 2.4, 0.5);
+            wing.castShadow = true;
+            group.add(wing);
+
+            // Tail Stabilizer Fin
+            const tailFin = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4.4, 3.2), goldMat);
+            tailFin.position.set(0, 4.8, -6.5);
+            group.add(tailFin);
+
+            const tailWing = new THREE.Mesh(new THREE.BoxGeometry(7.5, 0.25, 2.0), goldMat);
+            tailWing.position.set(0, 3.2, -6.8);
+            group.add(tailWing);
+
+            return group;
+        }
+
+        function createPlayer3DMesh(gender = 'male') {
+            const group = new THREE.Group();
+            const outfitColor = gender === 'female' ? 0xec4899 : 0x0284c7;
+            const torso = new THREE.Mesh(
+                new THREE.BoxGeometry(1.1, 1.5, 0.6),
+                new THREE.MeshStandardMaterial({ color: outfitColor })
+            );
+            torso.position.y = 1.65;
+            torso.castShadow = true;
+            group.add(torso);
+
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.42, 12, 12),
+                new THREE.MeshStandardMaterial({ color: 0xfcd34d })
+            );
+            head.position.y = 2.75;
+            group.add(head);
+
+            const legs = new THREE.Mesh(
+                new THREE.BoxGeometry(0.95, 1.0, 0.5),
+                new THREE.MeshStandardMaterial({ color: 0x0f172a })
+            );
+            legs.position.y = 0.5;
+            group.add(legs);
+
+            return group;
+        }
+
+        function createPolice3DMesh(type) {
+            const group = new THREE.Group();
+            if (type === 'heli') {
+                const body = new THREE.Mesh(
+                    new THREE.BoxGeometry(3.2, 2.4, 7.5),
+                    new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.6 })
+                );
+                body.castShadow = true;
+                group.add(body);
+
+                const rotor = new THREE.Mesh(
+                    new THREE.BoxGeometry(14, 0.15, 0.8),
+                    new THREE.MeshBasicMaterial({ color: 0x94a3b8 })
+                );
+                rotor.position.y = 1.6;
+                group.add(rotor);
+                group.userData.rotor = rotor;
+            } else {
+                const isMil = type === 'military';
+                const isSwat = type === 'swat';
+                const col = isMil ? 0x3f6212 : (isSwat ? 0x090a0f : 0x1e293b);
+                const w = isSwat || isMil ? 4.8 : 4.2;
+                const h = isSwat || isMil ? 2.8 : 1.7;
+                const l = isSwat || isMil ? 9.5 : 8.2;
+
+                const body = new THREE.Mesh(
+                    new THREE.BoxGeometry(w, h, l),
+                    new THREE.MeshStandardMaterial({ color: col, roughness: 0.4 })
+                );
+                body.position.y = h / 2 + 0.5;
+                body.castShadow = true;
+                group.add(body);
+
+                // Flashing Red/Blue Lightbar
+                const sirenRed = new THREE.Mesh(
+                    new THREE.BoxGeometry(1.1, 0.4, 0.6),
+                    new THREE.MeshBasicMaterial({ color: 0xef4444 })
+                );
+                sirenRed.position.set(-0.7, h + 0.7, 0);
+                group.add(sirenRed);
+
+                const sirenBlue = new THREE.Mesh(
+                    new THREE.BoxGeometry(1.1, 0.4, 0.6),
+                    new THREE.MeshBasicMaterial({ color: 0x3b82f6 })
+                );
+                sirenBlue.position.set(0.7, h + 0.7, 0);
+                group.add(sirenBlue);
+
+                group.userData.sirenRed = sirenRed;
+                group.userData.sirenBlue = sirenBlue;
+            }
+            return group;
+        }
+
+        // ==========================================
+        // 5. GAME STATE & ENTITIES
+        // ==========================================
+        const state = {
+            running: false,
+            keys: {},
+            camOrbit: { yaw: 0, pitch: 0.34, dragging: false, lastX: 0, lastY: 0 },
+            waypoint: null,
+            admin: {
+                flyMode: false,
+                godMode: false,
+                engineBoost: 1.0
+            },
+            player: {
+                x: -60,
+                y: 0,
+                z: 45,
+                yaw: Math.PI,
+                health: 100,
+                armor: 100,
+                inVehicleId: 'porsche_gt3',
+                mesh: null
+            },
+            vehicles: [],
+            police: [],
+            wanted: {
+                stars: 0,
+                evadeTimer: 0,
+                maxEvadeTime: 10,
+                isEvading: false
+            },
+            mission: {
+                active: null,
+                timer: 0,
+                duration: 24
+            },
+            heist: {
+                crewCount: 3,
+                hackCurrent: 1,
+                hackTimer: 20,
+                hackInterval: null,
+                guardsDown: 0
+            }
+        };
+
+        function init3DEntities() {
+            // Clear previous if re-init
+            state.vehicles.forEach(v => scene.remove(v.mesh));
+            state.vehicles = [];
+            if (state.player.mesh) scene.remove(state.player.mesh);
+
+            // Player 3D Character
+            state.player.mesh = createPlayer3DMesh(currentUser ? currentUser.gender : 'male');
+            scene.add(state.player.mesh);
+
+            // 1. Porsche 911 GT3 RS (Black-Gold Welcome Gift)
+            const porscheMesh = createPorsche3DMesh('#111318');
+            scene.add(porscheMesh);
+            state.vehicles.push({
+                id: 'porsche_gt3',
+                name: 'Porsche 911 GT3 RS (Schwarz-Gold)',
+                type: 'car',
+                x: -60,
+                y: 0,
+                z: 45,
+                yaw: Math.PI,
+                pitch: 0,
+                roll: 0,
+                speed: 0,
+                maxSpeed: 98,
+                accel: 68,
+                turnSpeed: 2.4,
+                owned: true,
+                mesh: porscheMesh
+            });
+
+            // 2. Golden Private Jet at LSIA Airport
+            const jetMesh = createGoldenJet3DMesh();
+            scene.add(jetMesh);
+            state.vehicles.push({
+                id: 'golden_jet',
+                name: 'Luxor Gold Jet (Privatjet)',
+                type: 'jet',
+                x: WORLD.airport.jetSpawnX,
+                y: 0,
+                z: WORLD.airport.jetSpawnZ,
+                yaw: Math.PI,
+                pitch: 0,
+                roll: 0,
+                speed: 0,
+                maxSpeed: 165,
+                accel: 65,
+                turnSpeed: 1.6,
+                owned: currentUser ? currentUser.vehicles.includes('golden_jet') : false,
+                mesh: jetMesh
+            });
+
+            // 3. Getaway Armored Car near Maze Tower
+            const getawayMesh = createPorsche3DMesh('#1e293b');
+            scene.add(getawayMesh);
+            state.vehicles.push({
+                id: 'escape_car',
+                name: 'Gepanzertes Fluchtauto',
+                type: 'car',
+                x: -38,
+                y: 0,
+                z: -12,
+                yaw: Math.PI / 2,
+                pitch: 0,
+                roll: 0,
+                speed: 0,
+                maxSpeed: 92,
+                accel: 64,
+                turnSpeed: 2.3,
+                owned: true,
+                mesh: getawayMesh
+            });
+        }
+
+        // ==========================================
+        // 6. MOUSE & TOUCH CAMERA ORBIT CONTROLS
+        // ==========================================
+        renderer.domElement.addEventListener('mousedown', (e) => {
+            state.camOrbit.dragging = true;
+            state.camOrbit.lastX = e.clientX;
+            state.camOrbit.lastY = e.clientY;
+        });
+        window.addEventListener('mouseup', () => {
+            state.camOrbit.dragging = false;
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!state.camOrbit.dragging) return;
+            const dx = e.clientX - state.camOrbit.lastX;
+            const dy = e.clientY - state.camOrbit.lastY;
+            state.camOrbit.lastX = e.clientX;
+            state.camOrbit.lastY = e.clientY;
+            state.camOrbit.yaw -= dx * 0.006;
+            state.camOrbit.pitch = Math.max(0.08, Math.min(1.15, state.camOrbit.pitch + dy * 0.005));
+        });
+
+        // ==========================================
+        // 7. LOADING, AUTH & CHARACTER FLOW
+        // ==========================================
+        window.addEventListener('load', () => {
+            resizeMinimap();
+            let pct = 0;
+            const timer = setInterval(() => {
+                pct += Math.floor(Math.random() * 18) + 10;
+                if (pct >= 100) {
+                    pct = 100;
+                    clearInterval(timer);
+                    document.getElementById('loadingBar').style.width = '100%';
+                    document.getElementById('loadingPercent').textContent = '100%';
+                    setTimeout(() => {
+                        const ls = document.getElementById('loadingScreen');
+                        ls.classList.add('opacity-0');
+                        setTimeout(() => {
+                            ls.classList.add('hidden');
+                            document.getElementById('authScreen').classList.remove('hidden');
+                        }, 500);
+                    }, 300);
+                } else {
+                    document.getElementById('loadingBar').style.width = pct + '%';
+                    document.getElementById('loadingPercent').textContent = pct + '%';
+                }
+            }, 85);
+        });
+
+        document.getElementById('authSubmitBtn').addEventListener('click', () => {
+            sfx.init();
+            const username = document.getElementById('usernameInput').value.trim();
+            const password = document.getElementById('passwordInput').value.trim();
+            const errorEl = document.getElementById('authError');
+
+            if (username.length < 3 || password.length < 4) {
+                errorEl.textContent = 'Bitte Benutzername (min. 3 Zeichen) und Passwort (min. 4 Zeichen, z. B. John1234) eingeben.';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            errorEl.classList.add('hidden');
+
+            const accounts = loadAllAccounts();
+            const key = username.toLowerCase();
+
+            if (accounts[key]) {
+                if (accounts[key].password !== password) {
+                    errorEl.textContent = 'Falsches Passwort!';
+                    errorEl.classList.remove('hidden');
+                    return;
+                }
+                currentUser = accounts[key];
+                document.getElementById('authScreen').classList.add('hidden');
+                start3DSession(false);
+                showToast(`Willkommen zurück in 3D, ${currentUser.username}!`);
+            } else {
+                currentUser = {
+                    username,
+                    password,
+                    gender: 'male',
+                    money: 25000,
+                    vehicles: ['porsche_gt3'],
+                    isNew: true
+                };
+                document.getElementById('authScreen').classList.add('hidden');
+                document.getElementById('charSelectScreen').classList.remove('hidden');
+            }
+        });
+
+        function selectGender(g) {
+            sfx.playTone(620, 'sine', 0.14, 0.1);
+            currentUser.gender = g;
+            document.getElementById('charSelectScreen').classList.add('hidden');
+            start3DSession(true);
+        }
+        document.getElementById('selectMaleBtn').addEventListener('click', () => selectGender('male'));
+        document.getElementById('selectFemaleBtn').addEventListener('click', () => selectGender('female'));
+
+        document.getElementById('claimGiftBtn').addEventListener('click', () => {
+            sfx.playReward();
+            document.getElementById('welcomeGiftModal').classList.add('hidden');
+            currentUser.isNew = false;
+            saveCurrentUser();
+            showToast('🎁 3D Porsche 911 GT3 RS (Schwarz-Gold) freigeschaltet!');
+        });
+
+        function start3DSession(isNew) {
+            init3DEntities();
+            const porsche = state.vehicles.find(v => v.id === 'porsche_gt3');
+            state.player.x = porsche.x;
+            state.player.z = porsche.z;
+            state.player.inVehicleId = 'porsche_gt3';
+
+            document.getElementById('gameHud').classList.remove('hidden');
+            document.getElementById('minimapContainer').classList.remove('hidden');
+            document.getElementById('statusBars').classList.remove('hidden');
+            if ('ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 920) {
+                document.getElementById('touchControls').classList.remove('hidden');
+            }
+
+            saveCurrentUser();
+            updateHud();
+
+            if (isNew) {
+                document.getElementById('welcomeGiftModal').classList.remove('hidden');
+            }
+
+            if (!state.running) {
+                state.running = true;
+                lastTime = performance.now();
+                requestAnimationFrame(animateLoop);
+            }
+        }
+
+        // ==========================================
+        // 8. HUD, DYNAMIC 5 STARS, CHAT & ADMIN PANEL
+        // ==========================================
+        function formatEuro(n) {
+            return n.toLocaleString('de-DE') + ' €';
+        }
+
+        function updateHud() {
+            if (!currentUser) return;
+            document.getElementById('hudUsername').textContent = currentUser.username;
+            document.getElementById('hudAvatar').textContent = currentUser.gender === 'female' ? '👑' : '🕶️';
+            document.getElementById('hudMoney').textContent = formatEuro(currentUser.money);
+
+            const activeVeh = state.vehicles.find(v => v.id === state.player.inVehicleId);
+            const badge = document.getElementById('hudModeBadge');
+            if (activeVeh) {
+                badge.textContent = activeVeh.type === 'jet' ? '✈️ GOLD-JET' : '🏎️ GT3 RS';
+            } else {
+                badge.textContent = state.admin.flyMode ? '🕊️ FLY-MODE' : '🚶 ZU FUSS';
+            }
+
+            // Zone Check
+            let zone = 'Downtown Los Santos';
+            if (state.player.x > 160 && state.player.z > 160) zone = 'LSIA International Airport';
+            else if (Math.hypot(state.player.x - WORLD.mazeTower.x, state.player.z - WORLD.mazeTower.z) < 110) zone = 'Maze Bank Tower Plaza';
+            document.getElementById('hudZone').textContent = zone;
+
+            // Dynamic 5 Wanted Stars (Invisible at 0 stars!)
+            const starsBox = document.getElementById('wantedStarsContainer');
+            const statusText = document.getElementById('wantedStatusText');
+            const minimapBox = document.getElementById('minimapContainer');
+            const starIcons = starsBox.querySelectorAll('.star-icon');
+
+            if (state.wanted.stars <= 0) {
+                starsBox.classList.remove('active');
+                statusText.classList.add('hidden');
+                minimapBox.classList.remove('wanted-flash');
+            } else {
+                starsBox.classList.add('active');
+                statusText.classList.remove('hidden');
+                minimapBox.classList.add('wanted-flash');
+
+                const labels = [
+                    '',
+                    '★ STREIFENWAGEN',
+                    '★★ AGGRESSIVE POLIZEI',
+                    '★★★ POLIZEI-HELIKOPTER',
+                    '★★★★ SWAT-EINHEIT',
+                    '★★★★★ MILITÄR-ALARM'
+                ];
+                statusText.textContent = state.wanted.isEvading
+                    ? `ENTKOMMEN... (${Math.ceil(state.wanted.maxEvadeTime - state.wanted.evadeTimer)}s)`
+                    : labels[state.wanted.stars];
+
+                starIcons.forEach((el, idx) => {
+                    el.classList.remove('star-active', 'star-evading', 'star-inactive');
+                    if (idx < state.wanted.stars) {
+                        el.classList.add(state.wanted.isEvading ? 'star-evading' : 'star-active');
+                    } else {
+                        el.classList.add('star-inactive');
+                    }
+                });
+            }
+        }
+
+        function setWantedStars(stars) {
+            const clamped = Math.max(0, Math.min(5, stars));
+            if (clamped > state.wanted.stars) {
+                state.wanted.evadeTimer = 0;
+                state.wanted.isEvading = false;
+            }
+            state.wanted.stars = clamped;
+            updateHud();
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toastMessage');
+            toast.textContent = msg;
+            toast.classList.remove('hidden');
+            clearTimeout(toast._timer);
+            toast._timer = setTimeout(() => toast.classList.add('hidden'), 4000);
+        }
+
+        // Chat Logic (Roblox-Style Unfiltered)
+        function appendChatMessage(sender, text, colorClass = 'text-cyan-300') {
+            const box = document.getElementById('chatMessages');
+            const line = document.createElement('div');
+            const nameSpan = document.createElement('span');
+            nameSpan.className = `font-bold ${colorClass}`;
+            nameSpan.textContent = `[${sender}]: `;
+            line.appendChild(nameSpan);
+            line.appendChild(document.createTextNode(text));
+            box.appendChild(line);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        document.getElementById('chatSendBtn').addEventListener('click', sendChat);
+        document.getElementById('chatInput').addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') sendChat();
+        });
+
+        function sendChat() {
+            const input = document.getElementById('chatInput');
+            const msg = input.value.trim();
+            if (!msg) return;
+            appendChatMessage(currentUser ? currentUser.username : 'Spieler', msg, 'text-emerald-400');
+            input.value = '';
+            input.blur();
+        }
+
+        // Admin Panel & Tuning Controls
+        document.getElementById('btnAdminPanel').addEventListener('click', () => {
+            document.getElementById('adminModal').classList.remove('hidden');
+        });
+        document.getElementById('closeAdminBtn').addEventListener('click', () => {
+            document.getElementById('adminModal').classList.add('hidden');
+        });
+
+        document.getElementById('toggleFlyMode').addEventListener('click', () => {
+            state.admin.flyMode = !state.admin.flyMode;
+            document.getElementById('flyModeStatus').textContent = state.admin.flyMode ? 'AN (Leertaste hoch / Shift runter)' : 'AUS';
+            updateHud();
+            showToast(state.admin.flyMode ? '🕊️ Admin Fly-Mode aktiviert!' : 'Fly-Mode deaktiviert');
+        });
+
+        document.getElementById('toggleGodMode').addEventListener('click', () => {
+            state.admin.godMode = !state.admin.godMode;
+            document.getElementById('godModeStatus').textContent = state.admin.godMode ? 'AN (Unsterblich)' : 'AUS';
+            if (state.admin.godMode) {
+                state.player.health = 100;
+                state.player.armor = 100;
+                document.getElementById('healthFill').style.width = '100%';
+                document.getElementById('armorFill').style.width = '100%';
+            }
+            showToast(state.admin.godMode ? '⚡ God Mode & Unsterblichkeit aktiv!' : 'God Mode deaktiviert');
+        });
+
+        document.getElementById('btnAdminAddMoney').addEventListener('click', () => {
+            if (!currentUser) return;
+            currentUser.money += 100000;
+            saveCurrentUser();
+            sfx.playReward();
+            showToast('💵 +100.000 € für Autoteile & Tuning gutgeschrieben!');
+        });
+
+        document.getElementById('btnAdminClearStars').addEventListener('click', () => {
+            setWantedStars(0);
+            showToast('🚓 Fahndungslevel gelöscht!');
+        });
+
+        document.getElementById('spawnPorscheBtn').addEventListener('click', () => {
+            const p = state.vehicles.find(v => v.id === 'porsche_gt3');
+            p.x = state.player.x + 8;
+            p.y = 0;
+            p.z = state.player.z + 8;
+            p.speed = 0;
+            document.getElementById('adminModal').classList.add('hidden');
+            showToast('🏎️ Porsche 911 GT3 RS vor dir gespawnt!');
+        });
+
+        document.getElementById('spawnJetBtn').addEventListener('click', () => {
+            const j = state.vehicles.find(v => v.id === 'golden_jet');
+            j.x = state.player.x + 14;
+            j.y = 0;
+            j.z = state.player.z + 14;
+            j.speed = 0;
+            j.pitch = 0;
+            j.roll = 0;
+            document.getElementById('adminModal').classList.add('hidden');
+            showToast('✈️ Goldener Privatjet vor dir gespawnt!');
+        });
+
+        // Tuning: Color & Engine Upgrade
+        document.querySelectorAll('.tune-color-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const hex = btn.getAttribute('data-color');
+                const p = state.vehicles.find(v => v.id === 'porsche_gt3');
+                if (p && p.mesh.userData.bodyMat) {
+                    p.mesh.userData.bodyMat.color.set(hex);
+                    showToast('🎨 Porsche GT3 RS Lackierung aktualisiert!');
+                }
+            });
+        });
+
+        document.getElementById('btnUpgradeEngine').addEventListener('click', () => {
+            if (!currentUser || currentUser.money < 15000) {
+                showToast('❌ Nicht genug Geld (15.000 € benötigt)!');
+                return;
+            }
+            currentUser.money -= 15000;
+            state.admin.engineBoost = 1.35;
+            const p = state.vehicles.find(v => v.id === 'porsche_gt3');
+            p.maxSpeed = 132;
+            p.accel = 92;
+            saveCurrentUser();
+            sfx.playReward();
+            showToast('🚀 Twin-Turbo Motor eingebaut! Höchstgeschwindigkeit erhöht!');
+        });
+
+        // Waypoints & Export Buttons
+        document.getElementById('btnNavAirport').addEventListener('click', () => {
+            state.waypoint = { x: WORLD.airport.jetSpawnX, z: WORLD.airport.jetSpawnZ, color: '#facc15' };
+            showToast('📍 Route zum Goldenen Jet am Flughafen (Südosten) gesetzt!');
+        });
+        document.getElementById('btnNavMaze').addEventListener('click', () => {
+            state.waypoint = { x: WORLD.mazeTower.doorX, z: WORLD.mazeTower.doorZ, color: '#38bdf8' };
+            showToast('📍 Route zum Maze Tower Banküberfall gesetzt!');
+        });
+        document.getElementById('btnManualExport').addEventListener('click', () => exportSaveFile(false));
+        document.getElementById('btnToggleSound').addEventListener('click', (e) => {
+            sfx.enabled = !sfx.enabled;
+            e.target.textContent = sfx.enabled ? '🔊' : '🔇';
+        });
+
+        // ==========================================
+        // 9. HEIST 1 (GOLDEN JET) & HEIST 2 (MAZE TOWER)
+        // ==========================================
+        function startGoldenJetHeist() {
+            const jet = state.vehicles.find(v => v.id === 'golden_jet');
+            state.player.inVehicleId = 'golden_jet';
+            state.player.x = jet.x;
+            state.player.y = jet.y;
+            state.player.z = jet.z;
+
+            setWantedStars(3); // 3 Stars -> Police Helicopters!
+            sfx.playAlarm();
+
+            state.mission.active = 'jet_heist';
+            state.mission.timer = 0;
+            state.mission.duration = 24;
+
+            const banner = document.getElementById('missionBanner');
+            banner.classList.remove('hidden');
+            document.getElementById('missionTitle').textContent = '✈️ FLUGHAFEN-HEIST: GOLDENER JET';
+            document.getElementById('missionDesc').textContent = 'Beschleunige (W), ziehe hoch (Leertaste / Pfeil Runter) und entkomme!';
+            document.getElementById('missionProgressWrap').classList.remove('hidden');
+            showToast('🚨 LUFTALARM! Hebe ab und entkomme der Luftverfolgungsjagd!');
+        }
+
+        function openMazeTowerHeist() {
+            document.getElementById('heistLobbyStep').classList.remove('hidden');
+            document.getElementById('heistHackStep').classList.add('hidden');
+            document.getElementById('heistInfiltrationStep').classList.add('hidden');
+            renderCrewList();
+            document.getElementById('mazeHeistModal').classList.remove('hidden');
+        }
+
+        function renderCrewList() {
+            const list = document.getElementById('crewList');
+            const roles = [
+                { name: currentUser ? currentUser.username : 'Du', role: 'Anführer & Fluchtfahrer', icon: '👑' },
+                { name: 'Lester_Tech', role: 'System-Hacker (Kameras)', icon: '💻' },
+                { name: 'Viper_GT', role: 'Tresor-Spezialist', icon: '🧨' },
+                { name: 'Shadow_99', role: 'Scharfschütze', icon: '🎯' },
+                { name: 'Ghost_Driver', role: 'Schwere Waffen', icon: '🛡️' }
+            ];
+            list.innerHTML = '';
+            for (let i = 0; i < state.heist.crewCount; i++) {
+                const m = roles[i];
+                const row = document.createElement('div');
+                row.className = 'flex items-center justify-between bg-slate-950/90 px-3 py-2 rounded-xl border border-slate-800';
+                row.innerHTML = `<span>${m.icon} <b class="text-white">${m.name}</b></span><span class="text-cyan-400 font-semibold">${m.role}</span>`;
+                list.appendChild(row);
+            }
+        }
+
+        document.getElementById('addCrewBtn').addEventListener('click', () => {
+            if (state.heist.crewCount < 5) { state.heist.crewCount++; renderCrewList(); }
+        });
+        document.getElementById('removeCrewBtn').addEventListener('click', () => {
+            if (state.heist.crewCount > 2) { state.heist.crewCount--; renderCrewList(); }
+        });
+        document.getElementById('closeHeistBtn').addEventListener('click', () => {
+            clearInterval(state.heist.hackInterval);
+            document.getElementById('mazeHeistModal').classList.add('hidden');
+        });
+
+        document.getElementById('startHackStepBtn').addEventListener('click', () => {
+            document.getElementById('heistLobbyStep').classList.add('hidden');
+            document.getElementById('heistHackStep').classList.remove('hidden');
+            initTerminalHack();
+        });
+
+        function initTerminalHack() {
+            const grid = document.getElementById('hackGrid');
+            const statusMsg = document.getElementById('hackStatusMsg');
+            const timerText = document.getElementById('hackTimerText');
+            grid.innerHTML = '';
+            statusMsg.textContent = 'Suche Knoten [1] ...';
+
+            state.heist.hackCurrent = 1;
+            state.heist.hackTimer = 20.0;
+
+            const cells = Array(12).fill(null);
+            const pos = [];
+            while (pos.length < 4) {
+                const r = Math.floor(Math.random() * 12);
+                if (!pos.includes(r)) pos.push(r);
+            }
+            pos.forEach((p, idx) => cells[p] = idx + 1);
+            const hexCodes = ['0xA4', '0x9F', '0x1C', '0x7E', '0xB2', '0x3D', '0x8A', '0x5F', '0xE1', '0x4B', '0x6C', '0x2D'];
+
+            cells.forEach((targetNum, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'h-14 rounded-xl border font-bold text-sm transition cursor-pointer flex flex-col items-center justify-center ' +
+                    (targetNum ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 hover:bg-cyan-900' : 'bg-slate-900 border-slate-800 text-slate-500');
+                btn.innerHTML = targetNum
+                    ? `<span class="text-[10px] text-amber-400">KNOTEN</span><span class="text-base font-black">[ ${targetNum} ]</span>`
+                    : `<span>${hexCodes[idx]}</span>`;
+
+                btn.addEventListener('click', () => {
+                    if (targetNum === state.heist.hackCurrent) {
+                        sfx.playHackNode(targetNum);
+                        btn.className = 'h-14 rounded-xl border border-emerald-400 bg-emerald-500/30 text-emerald-300 font-black text-sm flex items-center justify-center';
+                        btn.textContent = '✓ OK';
+                        state.heist.hackCurrent++;
+                        if (state.heist.hackCurrent > 4) {
+                            clearInterval(state.heist.hackInterval);
+                            statusMsg.textContent = 'KAMERAS DEAKTIVIERT!';
+                            setTimeout(() => {
+                                document.getElementById('heistHackStep').classList.add('hidden');
+                                document.getElementById('heistInfiltrationStep').classList.remove('hidden');
+                                state.heist.guardsDown = 0;
+                                document.getElementById('takedownGuardBtn').textContent = 'Wache lautlos ausschalten (1 / 3)';
+                            }, 650);
+                        } else {
+                            statusMsg.textContent = `Jetzt Knoten [${state.heist.hackCurrent}] klicken!`;
+                        }
+                    } else {
+                        sfx.playTone(180, 'sawtooth', 0.2, 0.12);
+                        statusMsg.textContent = 'FEHLER! Falsche Sequenz!';
+                    }
+                });
+                grid.appendChild(btn);
+            });
+
+            clearInterval(state.heist.hackInterval);
+            state.heist.hackInterval = setInterval(() => {
+                state.heist.hackTimer -= 0.1;
+                timerText.textContent = `ZEIT: ${Math.max(0, state.heist.hackTimer).toFixed(1)}s`;
+                if (state.heist.hackTimer <= 0) {
+                    clearInterval(state.heist.hackInterval);
+                    initTerminalHack();
+                }
+            }, 100);
+        }
+
+        document.getElementById('takedownGuardBtn').addEventListener('click', () => {
+            state.heist.guardsDown++;
+            sfx.playTone(320, 'triangle', 0.14, 0.12, 140);
+            if (state.heist.guardsDown < 3) {
+                document.getElementById('infiltrationDesc').textContent = `Wache ${state.heist.guardsDown} ausgeschaltet! Weiter zum Tresor...`;
+                document.getElementById('takedownGuardBtn').textContent = `Wache lautlos ausschalten (${state.heist.guardsDown + 1} / 3)`;
+            } else {
+                document.getElementById('mazeHeistModal').classList.add('hidden');
+                triggerPanicButtonCutscene();
+            }
+        });
+
+        function triggerPanicButtonCutscene() {
+            const overlay = document.getElementById('alarmCutsceneOverlay');
+            overlay.classList.remove('hidden');
+            sfx.playAlarm();
+
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+                const getaway = state.vehicles.find(v => v.id === 'escape_car');
+                getaway.x = WORLD.mazeTower.doorX + 18;
+                getaway.y = 0;
+                getaway.z = WORLD.mazeTower.doorZ + 12;
+                getaway.speed = 0;
+
+                state.player.x = getaway.x;
+                state.player.y = 0;
+                state.player.z = getaway.z;
+                state.player.inVehicleId = getaway.id;
+
+                setWantedStars(4); // 4 Stars -> SWAT & Helicopters!
+                state.mission.active = 'maze_escape';
+                state.mission.timer = 0;
+                state.mission.duration = 26;
+
+                const banner = document.getElementById('missionBanner');
+                banner.classList.remove('hidden');
+                document.getElementById('missionTitle').textContent = '🏦 MAZE TOWER FLUCHT (250.000 € BEUTE)';
+                document.getElementById('missionDesc').textContent = 'Entkomme SWAT & Polizei im Fluchtwagen!';
+                document.getElementById('missionProgressWrap').classList.remove('hidden');
+            }, 3200);
+        }
+
+        // ==========================================
+        // 10. KEYBOARD & TOUCH INPUT
+        // ==========================================
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+            state.keys[e.code] = true;
+
+            if (e.code === 'KeyE' || e.code === 'KeyF') {
+                handleInteraction();
+            } else if (e.code === 'KeyM') {
+                const m = document.getElementById('adminModal');
+                m.classList.toggle('hidden');
+            } else if (e.code === 'KeyT') {
+                e.preventDefault();
+                document.getElementById('chatInput').focus();
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            state.keys[e.code] = false;
+        });
+
+        document.querySelectorAll('.touch-btn').forEach(btn => {
+            const code = btn.getAttribute('data-key');
+            const down = (e) => { e.preventDefault(); state.keys[code] = true; };
+            const up = (e) => { e.preventDefault(); state.keys[code] = false; };
+            btn.addEventListener('touchstart', down);
+            btn.addEventListener('touchend', up);
+            btn.addEventListener('mousedown', down);
+            btn.addEventListener('mouseup', up);
+        });
+        document.getElementById('touchExitBtn').addEventListener('click', handleInteraction);
+        document.getElementById('interactPrompt').addEventListener('click', handleInteraction);
+
+        function handleInteraction() {
+            if (!state.running) return;
+            sfx.init();
+
+            // Check Maze Tower Door
+            if (!state.player.inVehicleId && Math.hypot(state.player.x - WORLD.mazeTower.doorX, state.player.z - WORLD.mazeTower.doorZ) < 16) {
+                openMazeTowerHeist();
+                return;
+            }
+
+            // Exit current vehicle
+            if (state.player.inVehicleId) {
+                const v = state.vehicles.find(veh => veh.id === state.player.inVehicleId);
+                if (v && v.type === 'jet' && v.y > 5) {
+                    showToast('✈️ Lande erst den Jet (langsamer werden), bevor du aussteigst!');
+                    return;
+                }
+                state.player.inVehicleId = null;
+                state.player.x = v.x - Math.cos(v.yaw) * 4.5;
+                state.player.z = v.z + Math.sin(v.yaw) * 4.5;
+                state.player.y = 0;
+                updateHud();
+                return;
+            }
+
+            // Enter nearest vehicle
+            let nearest = null;
+            let bestDist = 14;
+            state.vehicles.forEach(v => {
+                const d = Math.hypot(state.player.x - v.x, state.player.z - v.z);
+                if (d < bestDist) { bestDist = d; nearest = v; }
+            });
+
+            if (nearest) {
+                if (nearest.id === 'golden_jet' && !nearest.owned && state.mission.active !== 'jet_heist') {
+                    startGoldenJetHeist();
+                } else {
+                    state.player.inVehicleId = nearest.id;
+                    state.player.x = nearest.x;
+                    state.player.y = nearest.y;
+                    state.player.z = nearest.z;
+                }
+                updateHud();
+            }
+        }
+
+        // ==========================================
+        // 11. 3D PHYSICS, GTA FLIGHT CONTROLS & POLICE AI
+        // ==========================================
+        function update3DSimulation(dt, now) {
+            const w = state.keys['KeyW'] || state.keys['ArrowUp'];
+            const s = state.keys['KeyS'] || state.keys['ArrowDown'];
+            const a = state.keys['KeyA'] || state.keys['ArrowLeft'];
+            const d = state.keys['KeyD'] || state.keys['ArrowRight'];
+            const space = state.keys['Space'];
+            const shift = state.keys['ShiftLeft'] || state.keys['ShiftRight'];
+
+            const activeVeh = state.vehicles.find(v => v.id === state.player.inVehicleId);
+
+            if (activeVeh) {
+                state.player.mesh.visible = false;
+
+                if (activeVeh.type === 'car') {
+                    // 3D Sports Car Driving Physics
+                    if (w) activeVeh.speed += activeVeh.accel * dt;
+                    else if (s) activeVeh.speed -= activeVeh.accel * 1.15 * dt;
+                    else activeVeh.speed *= Math.pow(0.22, dt);
+
+                    if (space) activeVeh.speed *= Math.pow(0.05, dt); // Handbrake
+
+                    activeVeh.speed = Math.max(-35, Math.min(activeVeh.maxSpeed, activeVeh.speed));
+
+                    if (Math.abs(activeVeh.speed) > 1.5) {
+                        const dir = activeVeh.speed >= 0 ? 1 : -1;
+                        if (a) {
+                            activeVeh.yaw += activeVeh.turnSpeed * dt * dir;
+                            activeVeh.roll = THREE.MathUtils.lerp(activeVeh.roll, -0.08, 8 * dt);
+                        } else if (d) {
+                            activeVeh.yaw -= activeVeh.turnSpeed * dt * dir;
+                            activeVeh.roll = THREE.MathUtils.lerp(activeVeh.roll, 0.08, 8 * dt);
+                        } else {
+                            activeVeh.roll = THREE.MathUtils.lerp(activeVeh.roll, 0, 8 * dt);
+                        }
+                    }
+
+                    activeVeh.x += Math.sin(activeVeh.yaw) * activeVeh.speed * dt;
+                    activeVeh.z += Math.cos(activeVeh.yaw) * activeVeh.speed * dt;
+                    activeVeh.y = 0;
+
+                } else if (activeVeh.type === 'jet') {
+                    // GTA 5 Style Aircraft Flight Physics (Pitch, Roll, Yaw, Throttle)
+                    if (w || space) activeVeh.speed += activeVeh.accel * dt;
+                    else if (s || shift) activeVeh.speed -= activeVeh.accel * 0.85 * dt;
+                    else activeVeh.speed *= Math.pow(0.82, dt);
+
+                    activeVeh.speed = Math.max(0, Math.min(activeVeh.maxSpeed, activeVeh.speed));
+
+                    // Roll & Banking Turn (A / D)
+                    const turnFactor = activeVeh.speed > 15 ? 1 : activeVeh.speed / 15;
+                    if (a) {
+                        activeVeh.yaw += activeVeh.turnSpeed * dt * turnFactor;
+                        activeVeh.roll = THREE.MathUtils.lerp(activeVeh.roll, -0.55, 5 * dt);
+                    } else if (d) {
+                        activeVeh.yaw -= activeVeh.turnSpeed * dt * turnFactor;
+                        activeVeh.roll = THREE.MathUtils.lerp(activeVeh.roll, 0.55, 5 * dt);
+                    } else {
+                        activeVeh.roll = THREE.MathUtils.lerp(activeVeh.roll, 0, 5 * dt);
+                    }
+
+                    // Pitch Up / Down (Space / ArrowUp when flying, or Shift / S to descend)
+                    if (activeVeh.speed > 45) {
+                        if (space || state.keys['ArrowUp']) {
+                            activeVeh.pitch = THREE.MathUtils.lerp(activeVeh.pitch, 0.32, 4 * dt);
+                        } else if (shift || state.keys['ArrowDown']) {
+                            activeVeh.pitch = THREE.MathUtils.lerp(activeVeh.pitch, -0.28, 4 * dt);
+                        } else {
+                            // Automatic gentle lift at high speed
+                            const autoLift = activeVeh.y < 38 ? 0.08 : 0;
+                            activeVeh.pitch = THREE.MathUtils.lerp(activeVeh.pitch, autoLift, 3 * dt);
+                        }
+                    } else {
+                        activeVeh.pitch = THREE.MathUtils.lerp(activeVeh.pitch, -0.1, 4 * dt);
+                    }
+
+                    activeVeh.x += Math.sin(activeVeh.yaw) * Math.cos(activeVeh.pitch) * activeVeh.speed * dt;
+                    activeVeh.z += Math.cos(activeVeh.yaw) * Math.cos(activeVeh.pitch) * activeVeh.speed * dt;
+                    activeVeh.y += Math.sin(activeVeh.pitch) * activeVeh.speed * dt;
+                    activeVeh.y = Math.max(0, Math.min(260, activeVeh.y));
+                    if (activeVeh.y <= 0.05) activeVeh.pitch = Math.max(0, activeVeh.pitch);
+                }
+
+                // World Bounds
+                activeVeh.x = Math.max(-WORLD.halfSize + 20, Math.min(WORLD.halfSize - 20, activeVeh.x));
+                activeVeh.z = Math.max(-WORLD.halfSize + 20, Math.min(WORLD.halfSize - 20, activeVeh.z));
+
+                state.player.x = activeVeh.x;
+                state.player.y = activeVeh.y;
+                state.player.z = activeVeh.z;
+                state.player.yaw = activeVeh.yaw;
+
+                document.getElementById('telemetryPill').textContent = activeVeh.type === 'jet'
+                    ? `${Math.round(activeVeh.speed * 3.2)} km/h | Höhe: ${Math.round(activeVeh.y)}m`
+                    : `${Math.round(Math.abs(activeVeh.speed) * 2.6)} km/h`;
+
+            } else {
+                // On-Foot 3D Movement (+ Admin Fly Mode)
+                state.player.mesh.visible = true;
+                const moveSpeed = state.admin.flyMode ? 65 : 22;
+                let fwd = 0, strafe = 0;
+                if (w) fwd += 1;
+                if (s) fwd -= 1;
+                if (a) strafe += 1;
+                if (d) strafe -= 1;
+
+                if (fwd !== 0 || strafe !== 0) {
+                    const camYaw = state.player.yaw + state.camOrbit.yaw;
+                    const moveAngle = camYaw + Math.atan2(strafe, fwd);
+                    state.player.yaw = moveAngle;
+                    state.player.x += Math.sin(moveAngle) * moveSpeed * dt;
+                    state.player.z += Math.cos(moveAngle) * moveSpeed * dt;
+                }
+
+                if (state.admin.flyMode) {
+                    if (space) state.player.y += 45 * dt;
+                    if (shift) state.player.y = Math.max(0, state.player.y - 45 * dt);
+                } else {
+                    state.player.y = 0;
+                }
+
+                state.player.x = Math.max(-WORLD.halfSize + 15, Math.min(WORLD.halfSize - 15, state.player.x));
+                state.player.z = Math.max(-WORLD.halfSize + 15, Math.min(WORLD.halfSize - 15, state.player.z));
+
+                state.player.mesh.position.set(state.player.x, state.player.y, state.player.z);
+                state.player.mesh.rotation.y = state.player.yaw;
+
+                document.getElementById('telemetryPill').textContent = state.admin.flyMode
+                    ? `Fly-Mode | Höhe: ${Math.round(state.player.y)}m`
+                    : 'Zu Fuß';
+            }
+
+            // Sync all 3D Vehicle Meshes
+            state.vehicles.forEach(v => {
+                v.mesh.position.set(v.x, v.y, v.z);
+                v.mesh.rotation.order = 'YXZ';
+                v.mesh.rotation.y = v.yaw;
+                v.mesh.rotation.x = -v.pitch;
+                v.mesh.rotation.z = v.roll;
+            });
+
+            // Animate Marker Rings
+            markerRings.forEach((ring, i) => {
+                const sVal = 1 + Math.sin(now / 240 + i) * 0.14;
+                ring.scale.set(sVal, sVal, 1);
+            });
+
+            // Third-Person Chase Camera
+            const dist = activeVeh ? (activeVeh.type === 'jet' ? 28 : 17) : 11;
+            const heightOffset = activeVeh ? (activeVeh.type === 'jet' ? 8 : 5.5) : 4.2;
+            const totalYaw = state.player.yaw + state.camOrbit.yaw;
+
+            const camX = state.player.x - Math.sin(totalYaw) * dist * Math.cos(state.camOrbit.pitch * 0.5);
+            const camZ = state.player.z - Math.cos(totalYaw) * dist * Math.cos(state.camOrbit.pitch * 0.5);
+            const camY = state.player.y + heightOffset + Math.sin(state.camOrbit.pitch) * dist * 0.65;
+
+            camera.position.lerp(new THREE.Vector3(camX, Math.max(1.5, camY), camZ), 10 * dt);
+            camera.lookAt(state.player.x, state.player.y + 2.2, state.player.z);
+
+            updateContextPrompt();
+            updatePoliceAI(dt, now);
+            updateMissions(dt);
+        }
+
+        function updateContextPrompt() {
+            const promptEl = document.getElementById('interactPrompt');
+            const textEl = document.getElementById('interactText');
+
+            if (state.player.inVehicleId) {
+                promptEl.classList.add('hidden');
+                return;
+            }
+
+            if (Math.hypot(state.player.x - WORLD.mazeTower.doorX, state.player.z - WORLD.mazeTower.doorZ) < 16) {
+                textEl.textContent = 'Maze Tower Banküberfall starten (2–5 Spieler)';
+                promptEl.classList.remove('hidden');
+                return;
+            }
+
+            let nearVeh = null;
+            state.vehicles.forEach(v => {
+                if (Math.hypot(state.player.x - v.x, state.player.z - v.z) < 14) nearVeh = v;
+            });
+
+            if (nearVeh) {
+                textEl.textContent = nearVeh.id === 'golden_jet' && !nearVeh.owned
+                    ? 'Goldenen Jet klauen (100.000 € Luft-Heist)'
+                    : `In ${nearVeh.name} einsteigen`;
+                promptEl.classList.remove('hidden');
+            } else {
+                promptEl.classList.add('hidden');
+            }
+        }
+
+        function updatePoliceAI(dt, now) {
+            const stars = state.wanted.stars;
+            if (stars <= 0) {
+                state.police.forEach(p => scene.remove(p.mesh));
+                state.police = [];
+                return;
+            }
+
+            sfx.updateSiren(stars, now);
+
+            const desiredUnits = Math.min(7, stars + 1);
+            while (state.police.length < desiredUnits) {
+                const ang = Math.random() * Math.PI * 2;
+                const spawnDist = 135 + Math.random() * 45;
+                let type = 'patrol';
+                if (stars >= 5 && state.police.length % 2 === 0) type = 'military';
+                else if (stars >= 4 && state.police.length % 2 === 0) type = 'swat';
+                else if (stars >= 3 && state.police.length % 2 === 1) type = 'heli';
+
+                const mesh = createPolice3DMesh(type);
+                scene.add(mesh);
+                state.police.push({
+                    x: Math.max(-WORLD.halfSize + 30, Math.min(WORLD.halfSize - 30, state.player.x + Math.cos(ang) * spawnDist)),
+                    y: type === 'heli' ? 35 : 0,
+                    z: Math.max(-WORLD.halfSize + 30, Math.min(WORLD.halfSize - 30, state.player.z + Math.sin(ang) * spawnDist)),
+                    yaw: 0,
+                    type,
+                    speed: type === 'heli' ? 78 : (stars >= 2 ? 72 : 58),
+                    mesh
+                });
+            }
+
+            let anyClose = false;
+            const flash = Math.floor(now / 150) % 2 === 0;
+
+            state.police.forEach(cop => {
+                const dx = state.player.x - cop.x;
+                const dz = state.player.z - cop.z;
+                const dist = Math.hypot(dx, dz);
+                if (dist < 115) anyClose = true;
+
+                cop.yaw = Math.atan2(dx, dz);
+                cop.x += Math.sin(cop.yaw) * cop.speed * dt;
+                cop.z += Math.cos(cop.yaw) * cop.speed * dt;
+
+                if (cop.type === 'heli') {
+                    cop.y = THREE.MathUtils.lerp(cop.y, Math.max(28, state.player.y + 18), 2 * dt);
+                    if (cop.mesh.userData.rotor) cop.mesh.userData.rotor.rotation.y += 18 * dt;
+                } else {
+                    if (cop.mesh.userData.sirenRed) {
+                        cop.mesh.userData.sirenRed.material.color.setHex(flash ? 0xef4444 : 0x450a0a);
+                        cop.mesh.userData.sirenBlue.material.color.setHex(flash ? 0x172554 : 0x3b82f6);
+                    }
+                    if (dist < 9 && !state.admin.godMode) {
+                        state.player.armor = Math.max(0, state.player.armor - 10 * dt);
+                        document.getElementById('armorFill').style.width = state.player.armor + '%';
+                    }
+                }
+
+                cop.mesh.position.set(cop.x, cop.y, cop.z);
+                cop.mesh.rotation.y = cop.yaw;
+            });
+
+            if (!anyClose) {
+                state.wanted.isEvading = true;
+                state.wanted.evadeTimer += dt;
+                if (state.wanted.evadeTimer >= state.wanted.maxEvadeTime) {
+                    setWantedStars(0);
+                    showToast('✓ Fahndung erfolgreich abgeschüttelt!');
+                }
+            } else {
+                state.wanted.isEvading = false;
+                state.wanted.evadeTimer = Math.max(0, state.wanted.evadeTimer - dt * 1.5);
+            }
+            updateHud();
+        }
+
+        function updateMissions(dt) {
+            if (!state.mission.active) return;
+            const activeVeh = state.vehicles.find(v => v.id === state.player.inVehicleId);
+
+            if (state.mission.active === 'jet_heist') {
+                if (activeVeh && activeVeh.id === 'golden_jet' && activeVeh.y > 8) {
+                    state.mission.timer += dt;
+                }
+                const pct = Math.min(100, (state.mission.timer / state.mission.duration) * 100);
+                document.getElementById('missionProgressBar').style.width = pct + '%';
+
+                if (pct >= 100) {
+                    state.mission.active = null;
+                    document.getElementById('missionBanner').classList.add('hidden');
+                    setWantedStars(0);
+
+                    const jet = state.vehicles.find(v => v.id === 'golden_jet');
+                    jet.owned = true;
+                    if (!currentUser.vehicles.includes('golden_jet')) currentUser.vehicles.push('golden_jet');
+                    currentUser.money += 100000;
+                    saveCurrentUser();
+                    sfx.playReward();
+                    showToast('🏆 FLUGHAFEN-HEIST GESCHAFFT! +100.000 € & Goldener Jet gehört jetzt dir!');
+                }
+            } else if (state.mission.active === 'maze_escape') {
+                state.mission.timer += dt;
+                const pct = Math.min(100, (state.mission.timer / state.mission.duration) * 100);
+                document.getElementById('missionProgressBar').style.width = pct + '%';
+
+                if (pct >= 100) {
+                    state.mission.active = null;
+                    document.getElementById('missionBanner').classList.add('hidden');
+                    setWantedStars(0);
+
+                    currentUser.money += 250000;
+                    saveCurrentUser();
+                    sfx.playReward();
+                    showToast('💰 MAZE TOWER HEIST GESCHAFFT! +250.000 € Beute gesichert!');
+                }
+            }
+        }
+
+        // ==========================================
+        // 12. GTA 5 DETAILED RADAR MINIMAP
+        // ==========================================
+        const miniCanvas = document.getElementById('minimapCanvas');
+        const miniCtx = miniCanvas.getContext('2d');
+
+        function resizeMinimap() {
+            const box = document.getElementById('minimapContainer');
+            miniCanvas.width = box.clientWidth || 220;
+            miniCanvas.height = box.clientHeight || 150;
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        window.addEventListener('resize', resizeMinimap);
+
+        function renderMinimap(now) {
+            const w = miniCanvas.width;
+            const h = miniCanvas.height;
+            const scale = 0.24;
+
+            miniCtx.clearRect(0, 0, w, h);
+            miniCtx.fillStyle = '#0b1118';
+            miniCtx.fillRect(0, 0, w, h);
+
+            miniCtx.save();
+            miniCtx.translate(w / 2, h / 2);
+            miniCtx.scale(scale, scale);
+            miniCtx.translate(-state.player.x, -state.player.z);
+
+            // Airport Zone
+            const ap = WORLD.airport;
+            miniCtx.fillStyle = '#1e293b';
+            miniCtx.fillRect(ap.x - ap.w / 2, ap.z - ap.d / 2, ap.w, ap.d);
+
+            // Roads
+            miniCtx.fillStyle = '#475569';
+            WORLD.roadCoords.forEach(c => {
+                miniCtx.fillRect(-WORLD.halfSize, c - WORLD.roadWidth / 2, WORLD.halfSize * 2, WORLD.roadWidth);
+                miniCtx.fillRect(c - WORLD.roadWidth / 2, -WORLD.halfSize, WORLD.roadWidth, WORLD.halfSize * 2);
+            });
+
+            // Buildings
+            miniCtx.fillStyle = '#1e2532';
+            WORLD.buildings.forEach(b => {
+                miniCtx.fillRect(b.x - b.w / 2, b.z - b.d / 2, b.w, b.d);
+            });
+
+            // Maze Tower Icon
+            miniCtx.fillStyle = '#ef4444';
+            miniCtx.beginPath();
+            miniCtx.arc(WORLD.mazeTower.doorX, WORLD.mazeTower.doorZ, 28, 0, Math.PI * 2);
+            miniCtx.fill();
+
+            // Golden Jet Icon
+            const jet = state.vehicles.find(v => v.id === 'golden_jet');
+            if (jet) {
+                miniCtx.fillStyle = '#facc15';
+                miniCtx.beginPath();
+                miniCtx.arc(jet.x, jet.z, 26, 0, Math.PI * 2);
+                miniCtx.fill();
+            }
+
+            // Police Flashing Blips
+            const copFlash = Math.floor(now / 180) % 2 === 0;
+            state.police.forEach(p => {
+                miniCtx.fillStyle = copFlash ? '#ef4444' : '#3b82f6';
+                miniCtx.beginPath();
+                miniCtx.arc(p.x, p.z, 22, 0, Math.PI * 2);
+                miniCtx.fill();
+            });
+
+            miniCtx.restore();
+
+            // Center Player Arrow
+            miniCtx.save();
+            miniCtx.translate(w / 2, h / 2);
+            miniCtx.rotate(-state.player.yaw + Math.PI);
+            miniCtx.fillStyle = '#ffffff';
+            miniCtx.strokeStyle = '#06080d';
+            miniCtx.lineWidth = 2;
+            miniCtx.beginPath();
+            miniCtx.moveTo(0, -9);
+            miniCtx.lineTo(6, 7);
+            miniCtx.lineTo(0, 4);
+            miniCtx.lineTo(-6, 7);
+            miniCtx.closePath();
+            miniCtx.fill();
+            miniCtx.stroke();
+            miniCtx.restore();
+        }
+
+        // ==========================================
+        // 13. MAIN 3D RENDER LOOP
+        // ==========================================
+        let lastTime = performance.now();
+        function animateLoop(now) {
+            if (!state.running) return;
+            const dt = Math.min(0.05, (now - lastTime) / 1000);
+            lastTime = now;
+
+            update3DSimulation(dt, now);
+            renderer.render(scene, camera);
+            renderMinimap(now);
+
+            requestAnimationFrame(animateLoop);
+        }
+    </script>
+</body>
+</html>
